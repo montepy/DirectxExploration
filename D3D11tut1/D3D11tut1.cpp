@@ -19,10 +19,10 @@ LPCWSTR WndClassName = L"first window";
 HWND hWnd = NULL;
 const int SCREENWIDTH = 800;
 const int SCREENHEIGHT = 600;
-IDXGISwapChain* SwapChain;
-ID3D11Device* d3d11Device;
-ID3D11DeviceContext* d3d11DevCon;
-ID3D11RenderTargetView* renderTargetView;
+IDXGISwapChain* SwapChain; //allows for swapping between front and back buffers, which in turn allows smooth rendering
+ID3D11Device* d3d11Device; //handles loading of objects into memory
+ID3D11DeviceContext* d3d11DevCon; //handles actual rendering
+ID3D11RenderTargetView* renderTargetView; //essentially the back buffer. Data gets written to this object, and subsequ
 
 float red = 0.0f;
 float green = 0.0f;
@@ -132,7 +132,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
     switch (message)
     {
     case WM_KEYDOWN:
-		if (wParam == VK_ESCAPE) {
+		if (wParam == VK_ESCAPE) { 
 			if (MessageBox(0, L"Are you sure you want to exit?",
 				L"Really?", MB_YESNO | MB_ICONQUESTION) == IDYES)
 				DestroyWindow(hWnd);
@@ -153,12 +153,12 @@ int messageloop() {
 
 	ZeroMemory(&msg, sizeof(MSG));
 	while (true) {
-		if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {
+		if (PeekMessage(&msg, NULL, 0, 0, PM_REMOVE)) {//takes one message from queue and inserts it into msg
 			if (msg.message == WM_QUIT) {
 				break;
 			}
 			TranslateMessage(&msg);
-			DispatchMessage(&msg);
+			DispatchMessage(&msg); //sends message to WndProc for processinh
 		}
 		else {
 			UpdateScene();
@@ -173,37 +173,37 @@ int messageloop() {
 bool InitializeDirect3dApp(HINSTANCE hInstance) {
 	HRESULT hr;
 
-	DXGI_MODE_DESC bufferDesc;
+	DXGI_MODE_DESC bufferDesc; //buffer description object. Allows specification of buffer characteristics
 
 	ZeroMemory(&bufferDesc, sizeof(DXGI_MODE_DESC));
 
 	bufferDesc.Width = SCREENWIDTH;
 	bufferDesc.Height = SCREENHEIGHT;
 	bufferDesc.RefreshRate.Numerator = 60;
-	bufferDesc.RefreshRate.Denominator = 1;
-	bufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-	bufferDesc.ScanlineOrdering = DXGI_MODE_SCANLINE_ORDER_UNSPECIFIED;
-	bufferDesc.Scaling = DXGI_MODE_SCALING_UNSPECIFIED;
+	bufferDesc.RefreshRate.Denominator = 1; //back buffer refresh rate is represented by the numerator over denominator
+	bufferDesc.Format = DXGI_FORMAT_R8G8B8A8_UNORM; //sets pixel format. Currently set to eight bits for R,G,B, and alpha
+	bufferDesc.ScanlineOrdering = DXGI_MODE_SCANLINE_ORDER_UNSPECIFIED; //specifies when each scanline is rendered. Currently unspecified becaused scanline order doesn't matter if you don't see it.
+	bufferDesc.Scaling = DXGI_MODE_SCALING_UNSPECIFIED; //determines how image is scaled to a monitor. We are windowed so specifications are unneeded
 
-	DXGI_SWAP_CHAIN_DESC swapChainDesc;
+	DXGI_SWAP_CHAIN_DESC swapChainDesc; //allows description of swapchain characteristics
 
 	ZeroMemory(&swapChainDesc, sizeof(DXGI_SWAP_CHAIN_DESC));
 	swapChainDesc.BufferDesc = bufferDesc;
 	swapChainDesc.SampleDesc.Count = 1;
-	swapChainDesc.SampleDesc.Quality = 0;
-	swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+	swapChainDesc.SampleDesc.Quality = 0; //SampleDesc subobject describes amount of anti-aliasing that occurs.
+	swapChainDesc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT; //sets buffer as the render output
 	swapChainDesc.BufferCount = 1;
 	swapChainDesc.OutputWindow = hWnd;
 	swapChainDesc.Windowed = TRUE;
-	swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_DISCARD;
+	swapChainDesc.SwapEffect = DXGI_SWAP_EFFECT_DISCARD; //allows display driver to determine best use for used buffers
 
 	hr = D3D11CreateDeviceAndSwapChain(NULL, D3D_DRIVER_TYPE_HARDWARE, NULL, NULL, NULL, NULL,
 		D3D11_SDK_VERSION, &swapChainDesc, &SwapChain, &d3d11Device, NULL, &d3d11DevCon);
 
 	ID3D11Texture2D* BackBuffer;
-	hr = SwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&BackBuffer);
+	hr = SwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&BackBuffer); 
 
-	hr = d3d11Device->CreateRenderTargetView(BackBuffer, NULL, &renderTargetView);
+	hr = d3d11Device->CreateRenderTargetView(BackBuffer, NULL, &renderTargetView); //back buffer creation
 	BackBuffer->Release();
 
 	d3d11DevCon->OMSetRenderTargets(1, &renderTargetView, NULL);
@@ -221,7 +221,7 @@ bool InitScene() {
 	return true;
 }
 
-void UpdateScene() {
+void UpdateScene()  { //implements any changes from previous frame
 	red = colormodr*0.00005f;
 	green += colormodg*0.00002f;
 	blue += colormodb*0.00001f;
@@ -234,7 +234,7 @@ void UpdateScene() {
 		colormodb *= -1;
 }
 
-void DrawScene() {
+void DrawScene() { // performs actual rendering
 	float bgColor[4] = { red, green, blue, 1.0f };
 
 	d3d11DevCon->ClearRenderTargetView(renderTargetView, bgColor);
