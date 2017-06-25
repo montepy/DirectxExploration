@@ -52,4 +52,9 @@
       <Filter>Resource Files</Filter>
     </Image>
   </ItemGroup>
+  <ItemGroup>
+    <FxCompile Include="Effects.fx">
+      <Filter>Source Files</Filter>
+    </FxCompile>
+  </ItemGroup>
 </Project>

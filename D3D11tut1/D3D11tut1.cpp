@@ -3,7 +3,8 @@
 
 #pragma comment(lib,"d3d11.lib")
 #pragma comment(lib,"d3dx11.lib")
-#pragma comment(lib,"d3dx10.lib")
+#pragma comment(lib,"d3dx10.lib") //pragma comment indicates to the linker that the library in quotes is to be listed as a dependency on the project
+#pragma comment(lib,"d3dcompiler.lib")
 
 #include<windows.h>
 #include "stdafx.h"
@@ -11,6 +12,11 @@
 #include<d3d11.h>
 #include <d3d11_2.h>
 #include <d3d10.h>
+#include <DirectXMath.h>
+#include <d3dcompiler.h>
+
+
+using namespace DirectX;
 
 #define MAX_LOADSTRING 100
 
@@ -22,7 +28,13 @@ const int SCREENHEIGHT = 600;
 IDXGISwapChain* SwapChain; //allows for swapping between front and back buffers, which in turn allows smooth rendering
 ID3D11Device* d3d11Device; //handles loading of objects into memory
 ID3D11DeviceContext* d3d11DevCon; //handles actual rendering
-ID3D11RenderTargetView* renderTargetView; //essentially the back buffer. Data gets written to this object, and subsequ
+ID3D11RenderTargetView* renderTargetView; //essentially the back buffer. Data gets written to this object, and subsequently rendered
+ID3D11Buffer* triangleVertBuffer;
+ID3D11VertexShader* VS;
+ID3D11PixelShader* PS;
+ID3D10Blob* PS_Buffer;
+ID3D10Blob* VS_Buffer;
+ID3D11InputLayout* vertLayout;
 
 float red = 0.0f;
 float green = 0.0f;
@@ -31,6 +43,17 @@ int colormodr = 1;
 int colormodg = 1;
 int colormodb = 1;
 
+struct Vertex {
+	XMVECTOR pos; //positional value represented using XMVECTOR rather than D3DXVECTOR3 from the tutorial. Uses DirectXMath.h; You must change the namespace to DirectX before using.
+	D3DCOLORVALUE color; //Similar to above. Uses D3DCOLORVALUE rather than D3DXCOLOR
+};
+
+D3D11_INPUT_ELEMENT_DESC layout[] = { //specifies input layout when vertex data is written to vertex buffer
+	{"POSITION", 0,DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA,0},
+	{"COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT,0,0,D3D11_INPUT_PER_VERTEX_DATA,0 }
+};
+
+UINT NUMELEMENTS = ARRAYSIZE(layout);
 
 bool InitializeDirect3dApp(HINSTANCE hInstance);
 void ReleaseObjects();
@@ -215,9 +238,70 @@ void ReleaseObjects() {
 	SwapChain->Release();
 	d3d11Device->Release();
 	d3d11DevCon->Release();
+	VS->Release();
+	PS->Release();
+	VS_Buffer->Release();
+	PS_Buffer->Release();
+	vertLayout->Release();
+	renderTargetView->Release();
+	SwapChain->Release();
 }
 
 bool InitScene() {
+	HRESULT hr;
+	//Compiling Shaders
+	hr = D3DCompileFromFile(L"Effects.fx", 0, 0, "VS", "vs_5_0", 0, 0, &VS_Buffer, 0);
+	hr = D3DCompileFromFile(L"Effects.fx", 0, 0, "PS", "ps_5_0", 0, 0, &PS_Buffer, 0);
+	//Creating Shaders
+	hr = d3d11Device->CreateVertexShader(VS_Buffer->GetBufferPointer(), VS_Buffer->GetBufferSize(), NULL, &VS);
+	hr = d3d11Device->CreatePixelShader(PS_Buffer->GetBufferPointer(), PS_Buffer->GetBufferSize(), NULL, &PS);
+	//Setting Shaders
+	d3d11DevCon->VSSetShader(VS, NULL, NULL);
+	d3d11DevCon->PSSetShader(PS, NULL, NULL);
+
+	//Creating and populating Vertex Buffers
+	Vertex v[] = { //remember that structs do not have constructors!
+		{{0.0,0.5,0.0},{ 0.0,0.5,0.5,1.0 }},
+		{ {0.5,-0.5,0.5}, {0.0,0.5,0.5,1.0}},
+		{{-0.5,-0.5,0.5},{0.0,0.5,0.5,1.0}}
+	};
+
+	D3D11_BUFFER_DESC vertexBufferDesc;
+	ZeroMemory(&vertexBufferDesc, sizeof(vertexBufferDesc));
+
+	vertexBufferDesc.Usage = D3D11_USAGE_DEFAULT; //describes how buffer is used
+	vertexBufferDesc.ByteWidth = sizeof(Vertex)*3; // specifies the size of buffer; dependent on amount of vertices passed and size of vertices
+	vertexBufferDesc.BindFlags = D3D11_BIND_VERTEX_BUFFER;//Specifies that this is a vertex buffer
+	vertexBufferDesc.CPUAccessFlags = 0;
+	vertexBufferDesc.MiscFlags = 0;
+
+	//Specifies what kind of data is placed in buffer
+	D3D11_SUBRESOURCE_DATA vertexBufferData;
+	ZeroMemory(&vertexBufferData, sizeof(vertexBufferData));
+	vertexBufferData.pSysMem = v;
+	hr = d3d11Device->CreateBuffer(&vertexBufferDesc, &vertexBufferData, &triangleVertBuffer);
+	//set buffer data
+	UINT stride = sizeof(Vertex);//size of each Vertex
+	UINT offset = 0;// how far from the buffer beginning we start
+	d3d11DevCon->IASetVertexBuffers(0, 1, &triangleVertBuffer, &stride, &offset);
+
+	//set input layout
+	hr = d3d11Device->CreateInputLayout(layout, NUMELEMENTS, VS_Buffer->GetBufferPointer(), VS_Buffer->GetBufferSize(), &vertLayout);
+	d3d11DevCon->IASetInputLayout(vertLayout);
+
+	d3d11DevCon->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+	//Create and set viewport
+	D3D11_VIEWPORT viewport;
+	ZeroMemory(&viewport, sizeof(D3D11_VIEWPORT));
+	viewport.TopLeftX = 0;
+	viewport.TopLeftY = 0;
+	viewport.Width = SCREENWIDTH;
+	viewport.Height = SCREENHEIGHT;
+
+	d3d11DevCon->RSSetViewports(1, &viewport);
+
+
+
 	return true;
 }
 
@@ -238,6 +322,7 @@ void DrawScene() { // performs actual rendering
 	float bgColor[4] = { red, green, blue, 1.0f };
 
 	d3d11DevCon->ClearRenderTargetView(renderTargetView, bgColor);
+	d3d11DevCon->Draw(3, 0);
 
 	SwapChain->Present(0,0);
 }
