@@ -1,7 +1,17 @@
-float4 VS(float4 inPos: POSITION) : SV_POSITION{
-	return inPos;
+struct VS_OUTPUT
+{
+	float4 Pos : SV_POSITION;
+	float4 Color : COLOR;
+};
+
+
+VS_OUTPUT VS(float4 inPos: POSITION,float4 inColor: COLOR) {
+	VS_OUTPUT output;
+output.Color = inColor;
+output.Pos = inPos;
+	return output;
 }
 
-float4 PS(float4 color: COLOR) : SV_TARGET{
-	return color;
+float4 PS(VS_OUTPUT input) : SV_TARGET{
+	return input.Color;
 }
