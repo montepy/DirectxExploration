@@ -29,7 +29,8 @@ IDXGISwapChain* SwapChain; //allows for swapping between front and back buffers,
 ID3D11Device* d3d11Device; //handles loading of objects into memory
 ID3D11DeviceContext* d3d11DevCon; //handles actual rendering
 ID3D11RenderTargetView* renderTargetView; //essentially the back buffer. Data gets written to this object, and subsequently rendered
-ID3D11Buffer* triangleVertBuffer;
+ID3D11Buffer* VertexBuffer;
+ID3D11Buffer* IndexBuffer;
 ID3D11VertexShader* VS;
 ID3D11PixelShader* PS;
 ID3D10Blob* PS_Buffer;
@@ -244,6 +245,8 @@ void ReleaseObjects() {
 	PS_Buffer->Release();
 	vertLayout->Release();
 	renderTargetView->Release();
+	VertexBuffer->Release();
+	IndexBuffer->Release();
 	SwapChain->Release();
 }
 
@@ -270,7 +273,7 @@ bool InitScene() {
 
 
 	};
-
+	//Buffer description
 	D3D11_BUFFER_DESC vertexBufferDesc;
 	ZeroMemory(&vertexBufferDesc, sizeof(vertexBufferDesc));
 
@@ -284,11 +287,32 @@ bool InitScene() {
 	D3D11_SUBRESOURCE_DATA vertexBufferData;
 	ZeroMemory(&vertexBufferData, sizeof(vertexBufferData));
 	vertexBufferData.pSysMem = v;
-	hr = d3d11Device->CreateBuffer(&vertexBufferDesc, &vertexBufferData, &triangleVertBuffer);
+	hr = d3d11Device->CreateBuffer(&vertexBufferDesc, &vertexBufferData, &VertexBuffer);
 	//set buffer data
 	UINT stride = sizeof(Vertex);//size of each Vertex
 	UINT offset = 0;// how far from the buffer beginning we start
-	d3d11DevCon->IASetVertexBuffers(0, 1, &triangleVertBuffer, &stride, &offset);
+	d3d11DevCon->IASetVertexBuffers(0, 1, &VertexBuffer, &stride, &offset);
+
+	//create indices to be put into index buffer
+	DWORD indices[] = {
+		0,1,2,
+		1,3,0
+	};
+	//Buffer description is mostly the same as vertex buffer
+	D3D11_BUFFER_DESC indexBufferDesc;
+	ZeroMemory(&indexBufferDesc, sizeof(indexBufferDesc));
+
+	indexBufferDesc.Usage = D3D11_USAGE_DEFAULT;
+	indexBufferDesc.ByteWidth = sizeof(DWORD) * 6;
+	indexBufferDesc.BindFlags = D3D11_BIND_INDEX_BUFFER;
+	vertexBufferDesc.CPUAccessFlags = 0;
+	indexBufferDesc.MiscFlags = 0;
+
+	D3D11_SUBRESOURCE_DATA indexBufferData;
+	ZeroMemory(&indexBufferData, sizeof(indexBufferData));
+	indexBufferData.pSysMem = indices;
+	d3d11Device->CreateBuffer(&indexBufferDesc, &indexBufferData, &IndexBuffer);
+	d3d11DevCon->IASetIndexBuffer(IndexBuffer, DXGI_FORMAT_R32_UINT, 0);
 
 	//set input layout
 	hr = d3d11Device->CreateInputLayout(layout, NUMELEMENTS, VS_Buffer->GetBufferPointer(), VS_Buffer->GetBufferSize(), &vertLayout);
@@ -318,7 +342,7 @@ void DrawScene() { // performs actual rendering
 	float bgColor[4] = { red, green, blue, 1.0f };
 
 	d3d11DevCon->ClearRenderTargetView(renderTargetView, bgColor);
-	d3d11DevCon->Draw(4, 0);
+	d3d11DevCon->DrawIndexed(6, 0,0);
 
 	SwapChain->Present(0,0);
 }
