@@ -36,13 +36,9 @@ ID3D11PixelShader* PS;
 ID3D10Blob* PS_Buffer;
 ID3D10Blob* VS_Buffer;
 ID3D11InputLayout* vertLayout;
+ID3D11DepthStencilView* depthStencilView;
+ID3D11Texture2D* depthStencilBuffer;
 
-float red = 0.5f;
-float green = 0.5f;
-float blue = 0.5f;
-int colormodr = 1;
-int colormodg = 1;
-int colormodb = 1;
 //declaring vertex struct and vertice input layout
 struct Vertex {
 	XMFLOAT3 pos; 
@@ -230,7 +226,26 @@ bool InitializeDirect3dApp(HINSTANCE hInstance) {
 	hr = d3d11Device->CreateRenderTargetView(BackBuffer, NULL, &renderTargetView); //back buffer creation
 	BackBuffer->Release();
 
-	d3d11DevCon->OMSetRenderTargets(1, &renderTargetView, NULL);
+	//Depth Stencil Buffer description
+	D3D11_TEXTURE2D_DESC depthStencilDesc;
+
+	depthStencilDesc.Width = SCREENWIDTH;
+	depthStencilDesc.Height = SCREENHEIGHT;
+	depthStencilDesc.MipLevels = 1;
+	depthStencilDesc.ArraySize = 1;
+	depthStencilDesc.Format = DXGI_FORMAT_D24_UNORM_S8_UINT; //this format allocates 24 bits for the depth and 8 for the stencil
+	depthStencilDesc.SampleDesc.Count = 1;
+	depthStencilDesc.SampleDesc.Quality = 0;
+	depthStencilDesc.Usage = D3D11_USAGE_DEFAULT;
+	depthStencilDesc.BindFlags = D3D11_BIND_DEPTH_STENCIL;
+	depthStencilDesc.CPUAccessFlags = 0;
+	depthStencilDesc.MiscFlags = 0;
+
+	//Creation of Depth Stencil Buffer
+	d3d11Device->CreateTexture2D(&depthStencilDesc, NULL, &depthStencilBuffer);
+	d3d11Device->CreateDepthStencilView(depthStencilBuffer, NULL, &depthStencilView);
+
+	d3d11DevCon->OMSetRenderTargets(1, &renderTargetView, depthStencilView);
 
 	return true;
 }
@@ -248,6 +263,8 @@ void ReleaseObjects() {
 	VertexBuffer->Release();
 	IndexBuffer->Release();
 	SwapChain->Release();
+	depthStencilBuffer->Release();
+	depthStencilView->Release();
 }
 
 bool InitScene() {
@@ -264,11 +281,11 @@ bool InitScene() {
 
 	//Creating and populating Vertex Buffers
 	Vertex v[] = { //remember that structs do not have constructors unless defined!
-		{{0.5f,0.5f,0.0f},{ 1.0,1.0,1.0,1.0 }},
-		{ {0.5f,-0.5f,0.0f}, {0.0,0.5,0.5,1.0}},
+		{{0.5f,0.5f,0.5f},{ 1.0,1.0,1.0,1.0 }},
+		{ {0.5f,-0.5f,-0.05f}, {0.0,0.5,0.5,1.0}},
 
 
-		{ { -0.5f,0.5f,0.0f },{ 0.0,0.5,0.5,1.0 } },
+		{ { -0.5f,0.5f,0.5f },{ 0.0,0.5,0.5,1.0 } },
 		{{-0.5f,-0.5f,0.0f},{0.0,0.5,0.5,1.0}},
 
 
@@ -326,6 +343,8 @@ bool InitScene() {
 	viewport.TopLeftY = 0;
 	viewport.Width = SCREENWIDTH;
 	viewport.Height = SCREENHEIGHT;
+	viewport.MinDepth = 0.0;
+	viewport.MaxDepth = 1.0;
 
 	d3d11DevCon->RSSetViewports(1, &viewport);
 
@@ -339,9 +358,10 @@ void UpdateScene()  { //implements any changes from previous frame
 }
 
 void DrawScene() { // performs actual rendering
-	float bgColor[4] = { red, green, blue, 1.0f };
+	float bgColor[4] = { 0.0, 0.0, 0.0, 1.0f };
 
 	d3d11DevCon->ClearRenderTargetView(renderTargetView, bgColor);
+	d3d11DevCon->ClearDepthStencilView(depthStencilView, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0, 0.0);
 	d3d11DevCon->DrawIndexed(6, 0,0);
 
 	SwapChain->Present(0,0);
