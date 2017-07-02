@@ -38,6 +38,24 @@ ID3D10Blob* VS_Buffer;
 ID3D11InputLayout* vertLayout;
 ID3D11DepthStencilView* depthStencilView;
 ID3D11Texture2D* depthStencilBuffer;
+ID3D11Buffer* cbPerObjectBuffer;
+
+//defining matrices for world space, view space, and projection space
+XMMATRIX WVP;
+XMMATRIX World;
+XMMATRIX camView;
+XMMATRIX camProjection;
+
+XMVECTOR camPosition;
+XMVECTOR camTarget;
+XMVECTOR camUp;
+
+struct cbPerObject {
+	XMMATRIX WVP;
+};
+
+cbPerObject cbPerObj;
+
 
 //declaring vertex struct and vertice input layout
 struct Vertex {
@@ -244,11 +262,11 @@ bool InitializeDirect3dApp(HINSTANCE hInstance) {
 	//Creation of Depth Stencil Buffer
 	d3d11Device->CreateTexture2D(&depthStencilDesc, NULL, &depthStencilBuffer);
 	d3d11Device->CreateDepthStencilView(depthStencilBuffer, NULL, &depthStencilView);
-
 	d3d11DevCon->OMSetRenderTargets(1, &renderTargetView, depthStencilView);
 
 	return true;
 }
+
 
 void ReleaseObjects() {
 	SwapChain->Release();
@@ -265,6 +283,7 @@ void ReleaseObjects() {
 	SwapChain->Release();
 	depthStencilBuffer->Release();
 	depthStencilView->Release();
+	cbPerObjectBuffer->Release();
 }
 
 bool InitScene() {
@@ -348,8 +367,29 @@ bool InitScene() {
 
 	d3d11DevCon->RSSetViewports(1, &viewport);
 
+	
+	D3D11_BUFFER_DESC constantBufferDesc;
+	ZeroMemory(&constantBufferDesc, sizeof(D3D11_BUFFER_DESC));
+
+	constantBufferDesc.Usage = D3D11_USAGE_DEFAULT;
+	constantBufferDesc.ByteWidth = sizeof(cbPerObject);
+	constantBufferDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+	constantBufferDesc.CPUAccessFlags = 0;
+	constantBufferDesc.MiscFlags = 0;
+
+	D3D11_SUBRESOURCE_DATA constantBufferData;
+	constantBufferData.pSysMem = &cbPerObj;
+
+	hr = d3d11Device->CreateBuffer(&constantBufferDesc, &constantBufferData, &cbPerObjectBuffer);
 
 
+	camPosition = XMVectorSet(0.0f, 0.0f, -2.5f, 0.0f);
+	camTarget = XMVectorSet(0.0f, 0.0f, 0.0f, 0.0f);
+	camUp = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
+
+	camView = XMMatrixLookAtLH(camPosition, camTarget, camUp);
+
+	camProjection = XMMatrixPerspectiveFovLH(0.4f*3.14f, (float)SCREENWIDTH / SCREENHEIGHT, 1.0f, 1000.0f);
 	return true;
 }
 
@@ -362,6 +402,13 @@ void DrawScene() { // performs actual rendering
 
 	d3d11DevCon->ClearRenderTargetView(renderTargetView, bgColor);
 	d3d11DevCon->ClearDepthStencilView(depthStencilView, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0, 0.0);
+	World = XMMatrixIdentity();
+	WVP = World*camView*camProjection;
+	cbPerObj.WVP = XMMatrixTranspose(WVP);
+
+	d3d11DevCon->UpdateSubresource(cbPerObjectBuffer, 0, NULL, &cbPerObj, 0, 0);
+
+	d3d11DevCon->VSSetConstantBuffers(0, 1, &cbPerObjectBuffer);
 	d3d11DevCon->DrawIndexed(6, 0,0);
 
 	SwapChain->Present(0,0);
