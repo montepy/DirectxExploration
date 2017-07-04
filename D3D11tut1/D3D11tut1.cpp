@@ -39,6 +39,7 @@ ID3D11InputLayout* vertLayout;
 ID3D11DepthStencilView* depthStencilView;
 ID3D11Texture2D* depthStencilBuffer;
 ID3D11Buffer* cbPerObjectBuffer;
+ID3D11RasterizerState* WireFrame;
 
 //defining matrices for world space, view space, and projection space
 XMMATRIX WVP;
@@ -56,6 +57,14 @@ struct cbPerObject {
 
 cbPerObject cbPerObj;
 
+//matrices for world transformations
+XMMATRIX cube1World;
+XMMATRIX cube2World;
+
+XMMATRIX Rotation;
+XMMATRIX Scale;
+XMMATRIX Translation;
+float rot = 0.01f;
 
 //declaring vertex struct and vertice input layout
 struct Vertex {
@@ -284,6 +293,7 @@ void ReleaseObjects() {
 	depthStencilBuffer->Release();
 	depthStencilView->Release();
 	cbPerObjectBuffer->Release();
+	WireFrame->Release();
 }
 
 bool InitScene() {
@@ -300,13 +310,14 @@ bool InitScene() {
 
 	//Creating and populating Vertex Buffers
 	Vertex v[] = { //remember that structs do not have constructors unless defined!
-		{{0.5f,0.5f,0.5f},{ 1.0,1.0,1.0,1.0 }},
-		{ {0.5f,-0.5f,-0.05f}, {0.0,0.5,0.5,1.0}},
-
-
-		{ { -0.5f,0.5f,0.5f },{ 0.0,0.5,0.5,1.0 } },
-		{{-0.5f,-0.5f,0.0f},{0.0,0.5,0.5,1.0}},
-
+		{{-1.0f,-1.0f,-1.0f},{ 1.0f,0.0f,0.0f,1.0f }},
+		{ {-1.0f,1.0f,-1.0f}, {0.0f,1.0f,0.0f,1.0f}},
+		{ { 1.0f,1.0f,-1.0f },{ 0.0f,0.0f,1.0f,1.0f } },
+		{{1.0f,-1.0f,-1.0f},{1.0f,1.0f,0.0f,1.0f}},
+		{{-1.0f,-1.0f,1.0f},{0.0f,1.0f,1.0f,1.0f}},
+		{{-1.0f,1.0f,1.0f},{1.0f,1.0f,1.0f,1.0f}},
+		{{1.0f,1.0f,1.0f},{1.0f,0.0f,1.0f,1.0f}},
+		{{1.0f,-1.0f,1.0f},{1.0f,0.0f,0.0f,1.0f}}
 
 	};
 	//Buffer description
@@ -314,7 +325,7 @@ bool InitScene() {
 	ZeroMemory(&vertexBufferDesc, sizeof(vertexBufferDesc));
 
 	vertexBufferDesc.Usage = D3D11_USAGE_DEFAULT; //describes how buffer is used
-	vertexBufferDesc.ByteWidth = sizeof(Vertex)*4; // specifies the size of buffer; dependent on amount of vertices passed and size of vertices
+	vertexBufferDesc.ByteWidth = sizeof(Vertex)*8; // specifies the size of buffer; dependent on amount of vertices passed and size of vertices
 	vertexBufferDesc.BindFlags = D3D11_BIND_VERTEX_BUFFER;//Specifies that this is a vertex buffer
 	vertexBufferDesc.CPUAccessFlags = 0;
 	vertexBufferDesc.MiscFlags = 0;
@@ -331,15 +342,36 @@ bool InitScene() {
 
 	//create indices to be put into index buffer
 	DWORD indices[] = {
-		0,1,2,
-		1,3,0
+		// front face
+		0, 1, 2,
+		0, 2, 3,
+
+		// back face
+		4, 6, 5,
+		4, 7, 6,
+
+		// left face
+		4, 5, 1,
+		4, 1, 0,
+
+		// right face
+		3, 2, 6,
+		3, 6, 7,
+
+		// top face
+		1, 5, 6,
+		1, 6, 2,
+
+		// bottom face
+		4, 0, 3,
+		4, 3, 7
 	};
 	//Buffer description is mostly the same as vertex buffer
 	D3D11_BUFFER_DESC indexBufferDesc;
 	ZeroMemory(&indexBufferDesc, sizeof(indexBufferDesc));
 
 	indexBufferDesc.Usage = D3D11_USAGE_DEFAULT;
-	indexBufferDesc.ByteWidth = sizeof(DWORD) * 6;
+	indexBufferDesc.ByteWidth = sizeof(DWORD) * 12*3;
 	indexBufferDesc.BindFlags = D3D11_BIND_INDEX_BUFFER;
 	vertexBufferDesc.CPUAccessFlags = 0;
 	indexBufferDesc.MiscFlags = 0;
@@ -383,17 +415,53 @@ bool InitScene() {
 	hr = d3d11Device->CreateBuffer(&constantBufferDesc, &constantBufferData, &cbPerObjectBuffer);
 
 
-	camPosition = XMVectorSet(0.0f, 0.0f, -2.5f, 0.0f);
-	camTarget = XMVectorSet(0.0f, 0.0f, 0.0f, 0.0f);
+	camPosition = XMVectorSet(0.0f, 5.0f, -10.0f, 0.0f);
+	camTarget = XMVectorSet(0.0f, 0.0f, 0.0f, 0.0f); 
 	camUp = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
 
 	camView = XMMatrixLookAtLH(camPosition, camTarget, camUp);
 
 	camProjection = XMMatrixPerspectiveFovLH(0.4f*3.14f, (float)SCREENWIDTH / SCREENHEIGHT, 1.0f, 1000.0f);
+
+	//Describe and create rasterizer state
+	D3D11_RASTERIZER_DESC wfdesc;
+	ZeroMemory(&wfdesc, sizeof(D3D11_RASTERIZER_DESC));
+	wfdesc.FillMode = D3D11_FILL_WIREFRAME; //specifies drawn primitives will resemble wireframes
+	wfdesc.CullMode = D3D11_CULL_NONE; // specifies that both sides of primitives will be drawn
+	hr = d3d11Device->CreateRasterizerState(&wfdesc, &WireFrame);
+
 	return true;
 }
 
 void UpdateScene()  { //implements any changes from previous frame
+	rot += .0002f;
+	static float inc = 0.001f;
+	static float trans = 0.0f;
+	static float scale = 1.0f;
+	static float sinc = 0.005f;
+	trans += inc;
+	if (trans >= 3.0 || trans <= -3.0) {
+		inc *= -1;
+	}
+	if (rot > 6.28f)
+		rot = 0;
+	cube1World = XMMatrixIdentity();
+	XMVECTOR rotaxis = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
+	Rotation = XMMatrixRotationAxis(rotaxis, rot);
+	Translation = XMMatrixTranslation(0.0f, trans, 5.0f);
+
+	cube1World = Translation* Rotation;//Note that matrix effects are applied in the order that they are multiplied. 
+	//For example, the operation performed above applies the translation effect, then the rotation
+
+	cube2World = XMMatrixIdentity();
+	Rotation = XMMatrixRotationAxis(rotaxis, -rot);
+	if (scale >= 3.0 || scale < 1.0)
+		sinc *= -1;
+	scale += sinc;
+	Scale = XMMatrixScaling(scale, scale, 1.3f);
+
+	cube2World = Rotation*Scale;
+
 	return;
 }
 
@@ -403,13 +471,27 @@ void DrawScene() { // performs actual rendering
 	d3d11DevCon->ClearRenderTargetView(renderTargetView, bgColor);
 	d3d11DevCon->ClearDepthStencilView(depthStencilView, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0, 0.0);
 	World = XMMatrixIdentity();
-	WVP = World*camView*camProjection;
+	//first cube operations
+	WVP = cube1World*camView*camProjection;
 	cbPerObj.WVP = XMMatrixTranspose(WVP);
 
 	d3d11DevCon->UpdateSubresource(cbPerObjectBuffer, 0, NULL, &cbPerObj, 0, 0);
 
 	d3d11DevCon->VSSetConstantBuffers(0, 1, &cbPerObjectBuffer);
-	d3d11DevCon->DrawIndexed(6, 0,0);
+	d3d11DevCon->RSSetState(NULL);
+	d3d11DevCon->DrawIndexed(36, 0,0);
+
+	//second cube operations
+
+	WVP = cube2World*camView*camProjection;
+	cbPerObj.WVP = XMMatrixTranspose(WVP);
+
+	d3d11DevCon->UpdateSubresource(cbPerObjectBuffer, 0, NULL, &cbPerObj, 0, 0);
+
+	d3d11DevCon->VSSetConstantBuffers(0, 1, &cbPerObjectBuffer);
+	d3d11DevCon->RSSetState(WireFrame);
+
+	d3d11DevCon->DrawIndexed(36, 0, 0);
 
 	SwapChain->Present(0,0);
 }
