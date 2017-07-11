@@ -1,19 +1,21 @@
 // D3D11tut1.cpp : Defines the entry point for the application.
 //
 
+
 #pragma comment(lib,"d3d11.lib")
-#pragma comment(lib,"d3dx11.lib")
-#pragma comment(lib,"d3dx10.lib") //pragma comment indicates to the linker that the library in quotes is to be listed as a dependency on the project
+#pragma comment(lib,"d3d10.lib")//pragma comment indicates to the linker that the library in quotes is to be listed as a dependency on the project
 #pragma comment(lib,"d3dcompiler.lib")
 
-#include<windows.h>
 #include "stdafx.h"
+
+#include <windows.h>
 #include "D3D11tut1.h"
-#include<d3d11.h>
+#include <d3d11.h>
 #include <d3d11_2.h>
 #include <d3d10.h>
 #include <DirectXMath.h>
 #include <d3dcompiler.h>
+#include <WICTextureLoader.h>
 
 
 using namespace DirectX;
@@ -40,7 +42,9 @@ ID3D11DepthStencilView* depthStencilView;
 ID3D11Texture2D* depthStencilBuffer;
 ID3D11Buffer* cbPerObjectBuffer;
 ID3D11RasterizerState* WireFrame;
-ID3D11Buffer* cbPerFrameBuffer;
+
+ID3D11ShaderResourceView*CubeTexture;
+ID3D11SamplerState*CubesTexSamplerState;
 
 //defining matrices for world space, view space, and projection space
 XMMATRIX WVP;
@@ -54,7 +58,6 @@ XMVECTOR camUp;
 
 struct cbPerObject {
 	XMMATRIX WVP;
-	XMMATRIX World;
 };
 
 cbPerObject cbPerObj;
@@ -71,33 +74,12 @@ float rot = 0.01f;
 //declaring vertex struct and vertice input layout
 struct Vertex {
 	XMFLOAT3 pos; 
-	XMFLOAT4 color; 
-	XMFLOAT3 normal;
+	XMFLOAT2 texCoord; 
 };
-
-//light struct
-struct Light {
-	Light() {
-		ZeroMemory(this, sizeof(Light));
-	}
-	XMFLOAT3 dir;
-	float pad;
-	XMFLOAT4 ambient;
-	XMFLOAT4 diffuse;
-};
-
-Light light;
-
-//per frame constant buffer
-struct cbPerFrame {
-	Light light;
-};
-cbPerFrame constbuffPerFrame;
 
 D3D11_INPUT_ELEMENT_DESC layout[] = { //specifies input layout when vertex data is written to vertex buffer
 	{"POSITION", 0,DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA,0},
-	{"COLOR", 0, DXGI_FORMAT_R32G32B32A32_FLOAT,0,12,D3D11_INPUT_PER_VERTEX_DATA,0 },//Note:fifth parameter specifies offset in bytes from beginning of struct
-	{"NORMAL",0,DXGI_FORMAT_R32G32B32_FLOAT,0,20,D3D11_INPUT_PER_VERTEX_DATA,0}
+	{"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,0,12,D3D11_INPUT_PER_VERTEX_DATA,0 }//Note:fifth parameter specifies offset in bytes from beginning of struct
 };
 
 UINT NUMELEMENTS = ARRAYSIZE(layout);
@@ -317,8 +299,6 @@ void ReleaseObjects() {
 	depthStencilView->Release();
 	cbPerObjectBuffer->Release();
 	WireFrame->Release();
-
-	cbPerFrameBuffer->Release();
 }
 
 bool InitScene() {
@@ -335,14 +315,41 @@ bool InitScene() {
 
 	//Creating and populating Vertex Buffers
 	Vertex v[] = { //remember that structs do not have constructors unless defined!
-		{{-1.0f,-1.0f,-1.0f},{ 1.0f,0.0f,0.0f,1.0f },{ -1.0f,-1.0f,-1.0f } },
-		{ {-1.0f,1.0f,-1.0f}, {0.0f,1.0f,0.0f,1.0f},{ -1.0f,1.0f,-1.0f } },
-		{ { 1.0f,1.0f,-1.0f },{ 0.0f,0.0f,1.0f,1.0f },{ 1.0f,1.0f,-1.0f } },
-		{{1.0f,-1.0f,-1.0f},{1.0f,1.0f,0.0f,1.0f},{ 1.0f,-1.0f,-1.0f } },
-		{{-1.0f,-1.0f,1.0f},{0.0f,1.0f,1.0f,1.0f},{ -1.0f,-1.0f,1.0f } },
-		{{-1.0f,1.0f,1.0f},{1.0f,1.0f,1.0f,1.0f},{ -1.0f,1.0f,1.0f } },
-		{{1.0f,1.0f,1.0f},{1.0f,0.0f,1.0f,1.0f},{ 1.0f,1.0f,1.0f } },
-		{{1.0f,-1.0f,1.0f},{1.0f,0.0f,0.0f,1.0f},{ 1.0f,-1.0f,1.0f } }
+		// Front Face
+		{{-1.0f, -1.0f, -1.0f}, {0.0f, 1.0f}},
+		{{-1.0f,  1.0f, -1.0f}, {0.0f, 0.0f}},
+		{{1.0f,  1.0f, -1.0f}, {1.0f, 0.0f}},
+		{{1.0f, -1.0f, -1.0f}, {1.0f, 1.0f}},
+
+		// Back Face
+		{ { -1.0f, -1.0f, 1.0f}, {1.0f, 1.0f}},
+		{ { 1.0f, -1.0f, 1.0f},{ 0.0f, 1.0f}},
+		{ { 1.0f,  1.0f, 1.0f}, {0.0f, 0.0f}},
+		{ { -1.0f,  1.0f, 1.0f},{ 1.0f, 0.0f}},
+
+		// Top Face
+		{ { -1.0f, 1.0f, -1.0f}, {0.0f, 1.0f}},
+		{ { -1.0f, 1.0f,  1.0f}, {0.0f, 0.0f}},
+		{ { 1.0f, 1.0f,  1.0f}, {1.0f, 0.0f}},
+		{ { 1.0f, 1.0f, -1.0f}, {1.0f, 1.0f}},
+
+		// Bottom Face
+		{ { -1.0f, -1.0f, -1.0f}, {1.0f, 1.0f}},
+		{ { 1.0f, -1.0f, -1.0f}, {0.0f, 1.0f}},
+		{ { 1.0f, -1.0f,  1.0f}, {0.0f, 0.0f}},
+		{ { -1.0f, -1.0f,  1.0f}, {1.0f, 0.0f}},
+
+		// Left Face
+		{ { -1.0f, -1.0f,  1.0f}, {0.0f, 1.0f}},
+		{ { -1.0f,  1.0f,  1.0f}, {0.0f, 0.0f}},
+		{ { -1.0f,  1.0f, -1.0f}, {1.0f, 0.0f}},
+		{ { -1.0f, -1.0f, -1.0f}, {1.0f, 1.0f}},
+
+		// Right Face
+		{ { 1.0f, -1.0f, -1.0f}, {0.0f, 1.0f}},
+		{ { 1.0f,  1.0f, -1.0f}, {0.0f, 0.0f}},
+		{ { 1.0f,  1.0f,  1.0f}, {1.0f, 0.0f}},
+		{ { 1.0f, -1.0f,  1.0f}, {1.0f, 1.0f}}
 
 	};
 	//Buffer description
@@ -350,7 +357,7 @@ bool InitScene() {
 	ZeroMemory(&vertexBufferDesc, sizeof(vertexBufferDesc));
 
 	vertexBufferDesc.Usage = D3D11_USAGE_DEFAULT; //describes how buffer is used
-	vertexBufferDesc.ByteWidth = sizeof(Vertex)*8; // specifies the size of buffer; dependent on amount of vertices passed and size of vertices
+	vertexBufferDesc.ByteWidth = sizeof(Vertex)*24; // specifies the size of buffer; dependent on amount of vertices passed and size of vertices
 	vertexBufferDesc.BindFlags = D3D11_BIND_VERTEX_BUFFER;//Specifies that this is a vertex buffer
 	vertexBufferDesc.CPUAccessFlags = 0;
 	vertexBufferDesc.MiscFlags = 0;
@@ -367,29 +374,29 @@ bool InitScene() {
 
 	//create indices to be put into index buffer
 	DWORD indices[] = {
-		// front face
-		0, 1, 2,
-		0, 2, 3,
+		// Front Face
+		0,  1,  2,
+		0,  2,  3,
 
-		// back face
-		4, 6, 5,
-		4, 7, 6,
+		// Back Face
+		4,  5,  6,
+		4,  6,  7,
 
-		// left face
-		4, 5, 1,
-		4, 1, 0,
+		// Top Face
+		8,  9, 10,
+		8, 10, 11,
 
-		// right face
-		3, 2, 6,
-		3, 6, 7,
+		// Bottom Face
+		12, 13, 14,
+		12, 14, 15,
 
-		// top face
-		1, 5, 6,
-		1, 6, 2,
+		// Left Face
+		16, 17, 18,
+		16, 18, 19,
 
-		// bottom face
-		4, 0, 3,
-		4, 3, 7
+		// Right Face
+		20, 21, 22,
+		20, 22, 23
 	};
 	//Buffer description is mostly the same as vertex buffer
 	D3D11_BUFFER_DESC indexBufferDesc;
@@ -424,7 +431,7 @@ bool InitScene() {
 
 	d3d11DevCon->RSSetViewports(1, &viewport);
 
-	//describe and create per object constant buffer
+	
 	D3D11_BUFFER_DESC constantBufferDesc;
 	ZeroMemory(&constantBufferDesc, sizeof(D3D11_BUFFER_DESC));
 
@@ -438,18 +445,8 @@ bool InitScene() {
 	constantBufferData.pSysMem = &cbPerObj;
 
 	hr = d3d11Device->CreateBuffer(&constantBufferDesc, &constantBufferData, &cbPerObjectBuffer);
-	//describe and create per frame constant buffer
-	ZeroMemory(&constantBufferDesc, sizeof(D3D11_BUFFER_DESC));
 
-	constantBufferDesc.Usage = D3D11_USAGE_DEFAULT;
-	constantBufferDesc.ByteWidth = sizeof(cbPerFrame);
-	constantBufferDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
-	constantBufferDesc.CPUAccessFlags = 0;
-	constantBufferDesc.MiscFlags = 0;
 
-	hr = d3d11Device->CreateBuffer(&constantBufferDesc, NULL, &cbPerFrameBuffer);
-
-	//set camera parameters
 	camPosition = XMVectorSet(0.0f, 5.0f, -10.0f, 0.0f);
 	camTarget = XMVectorSet(0.0f, 0.0f, 0.0f, 0.0f); 
 	camUp = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
@@ -461,23 +458,33 @@ bool InitScene() {
 	//Describe and create rasterizer state
 	D3D11_RASTERIZER_DESC wfdesc;
 	ZeroMemory(&wfdesc, sizeof(D3D11_RASTERIZER_DESC));
-	wfdesc.FillMode = D3D11_FILL_SOLID; //specifies drawn primitives will resemble wireframes
+	wfdesc.FillMode = D3D11_FILL_WIREFRAME; //specifies drawn primitives will resemble wireframes
 	wfdesc.CullMode = D3D11_CULL_NONE; // specifies that both sides of primitives will be drawn
 	hr = d3d11Device->CreateRasterizerState(&wfdesc, &WireFrame);
 
-	light.dir = XMFLOAT3(0.25f, 0.5f, -1.0f);
-	light.ambient = XMFLOAT4(0.2f, 0.2f, 0.2f, 1.0f);
-	light.diffuse = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
+	//load textures into memory
+	hr = CreateWICTextureFromFile(d3d11Device, L"nuclear-symbol.jpg", NULL, &CubeTexture, 0);
+	//describe how the texture is rendered
+	D3D11_SAMPLER_DESC sampDesc;
+	ZeroMemory(&sampDesc, sizeof(sampDesc));
+	sampDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR; 
+	sampDesc.AddressU = D3D11_TEXTURE_ADDRESS_WRAP;
+	sampDesc.AddressV = D3D11_TEXTURE_ADDRESS_WRAP;
+	sampDesc.AddressW = D3D11_TEXTURE_ADDRESS_WRAP;
+	sampDesc.ComparisonFunc = D3D11_COMPARISON_NEVER;
+	sampDesc.MinLOD = 0;
+	sampDesc.MaxLOD = D3D11_FLOAT32_MAX;
 
+	hr = d3d11Device->CreateSamplerState(&sampDesc, &CubesTexSamplerState);
 	return true;
 }
 
 void UpdateScene()  { //implements any changes from previous frame
-	rot += .002f;
-	static float inc = 0.01f;
+	rot += .0002f;
+	static float inc = 0.001f;
 	static float trans = 0.0f;
 	static float scale = 1.0f;
-	static float sinc = 0.00f;
+	static float sinc = 0.005f;
 	trans += inc;
 	if (trans >= 3.0 || trans <= -3.0) {
 		inc *= -1;
@@ -501,7 +508,6 @@ void UpdateScene()  { //implements any changes from previous frame
 
 	cube2World = Rotation*Scale;
 
-
 	return;
 }
 
@@ -510,31 +516,16 @@ void DrawScene() { // performs actual rendering
 
 	d3d11DevCon->ClearRenderTargetView(renderTargetView, bgColor);
 	d3d11DevCon->ClearDepthStencilView(depthStencilView, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0, 0.0);
-
-
-	constbuffPerFrame.light = light;
-	d3d11DevCon->UpdateSubresource(cbPerFrameBuffer, 0, NULL, &constbuffPerFrame, 0, 0);
-	d3d11DevCon->PSSetConstantBuffers(0, 1, &cbPerFrameBuffer);
-
-	d3d11DevCon->VSSetShader(VS, 0, 0);
-	d3d11DevCon->PSSetShader(PS, 0, 0);
-
-	d3d11DevCon->OMSetRenderTargets(1, &renderTargetView, depthStencilView);
-	d3d11DevCon->IASetIndexBuffer(IndexBuffer, DXGI_FORMAT_R32_UINT, 0);
-
-	UINT stride = sizeof(Vertex);
-	UINT offset = 0;
-	d3d11DevCon->IASetVertexBuffers(0, 1, &VertexBuffer, &stride, &offset);
-
 	World = XMMatrixIdentity();
 	//first cube operations
 	WVP = cube1World*camView*camProjection;
 	cbPerObj.WVP = XMMatrixTranspose(WVP);
-	cbPerObj.World = XMMatrixTranspose(cube1World);
 
 	d3d11DevCon->UpdateSubresource(cbPerObjectBuffer, 0, NULL, &cbPerObj, 0, 0);
 
 	d3d11DevCon->VSSetConstantBuffers(0, 1, &cbPerObjectBuffer);
+	d3d11DevCon->PSSetShaderResources(0, 1, &CubeTexture);
+	d3d11DevCon->PSSetSamplers(0, 1, &CubesTexSamplerState);
 	d3d11DevCon->RSSetState(NULL);
 	d3d11DevCon->DrawIndexed(36, 0,0);
 
@@ -542,11 +533,13 @@ void DrawScene() { // performs actual rendering
 
 	WVP = cube2World*camView*camProjection;
 	cbPerObj.WVP = XMMatrixTranspose(WVP);
-	cbPerObj.World = XMMatrixTranspose(cube2World);
 
 	d3d11DevCon->UpdateSubresource(cbPerObjectBuffer, 0, NULL, &cbPerObj, 0, 0);
 
 	d3d11DevCon->VSSetConstantBuffers(0, 1, &cbPerObjectBuffer);
+
+	d3d11DevCon->PSSetShaderResources(0, 1, &CubeTexture);
+	d3d11DevCon->PSSetSamplers(0, 1, &CubesTexSamplerState);
 	d3d11DevCon->RSSetState(NULL);
 
 	d3d11DevCon->DrawIndexed(36, 0, 0);
