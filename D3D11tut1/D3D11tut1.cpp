@@ -41,11 +41,14 @@ ID3D11InputLayout* vertLayout;
 ID3D11DepthStencilView* depthStencilView;
 ID3D11Texture2D* depthStencilBuffer;
 ID3D11Buffer* cbPerObjectBuffer;
-ID3D11RasterizerState* WireFrame;
+ID3D11RasterizerState* FULL;
 
 ID3D11ShaderResourceView*CubeTexture;
 ID3D11SamplerState*CubesTexSamplerState;
 
+ID3D11BlendState* Transparency;
+ID3D11RasterizerState*CCWcullMode;//CCW means counterclockwise; CW means clockwise
+ID3D11RasterizerState*CWcullMode;
 //defining matrices for world space, view space, and projection space
 XMMATRIX WVP;
 XMMATRIX World;
@@ -298,7 +301,11 @@ void ReleaseObjects() {
 	depthStencilBuffer->Release();
 	depthStencilView->Release();
 	cbPerObjectBuffer->Release();
-	WireFrame->Release();
+	FULL->Release();
+
+	CCWcullMode->Release();
+	Transparency->Release();
+	CWcullMode->Release();
 }
 
 bool InitScene() {
@@ -328,10 +335,10 @@ bool InitScene() {
 		{ { -1.0f,  1.0f, 1.0f},{ 1.0f, 0.0f}},
 
 		// Top Face
-		{ { -1.0f, 1.0f, -1.0f}, {0.0f, 1.0f}},
-		{ { -1.0f, 1.0f,  1.0f}, {0.0f, 0.0f}},
-		{ { 1.0f, 1.0f,  1.0f}, {1.0f, 0.0f}},
-		{ { 1.0f, 1.0f, -1.0f}, {1.0f, 1.0f}},
+		{ { -1.0f, 1.0f, -1.0f}, {1.0f, 1.0f}},
+		{ { -1.0f, 1.0f,  1.0f}, {0.0f, 1.0f}},
+		{ { 1.0f, 1.0f,  1.0f}, {0.0f, 0.0f}},
+		{ { 1.0f, 1.0f, -1.0f}, {1.0f, 0.0f}},
 
 		// Bottom Face
 		{ { -1.0f, -1.0f, -1.0f}, {1.0f, 1.0f}},
@@ -447,7 +454,7 @@ bool InitScene() {
 	hr = d3d11Device->CreateBuffer(&constantBufferDesc, &constantBufferData, &cbPerObjectBuffer);
 
 
-	camPosition = XMVectorSet(0.0f, 5.0f, -10.0f, 0.0f);
+	camPosition = XMVectorSet(0.0f, -5.0f, -10.0f, 0.0f);
 	camTarget = XMVectorSet(0.0f, 0.0f, 0.0f, 0.0f); 
 	camUp = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
 
@@ -458,9 +465,9 @@ bool InitScene() {
 	//Describe and create rasterizer state
 	D3D11_RASTERIZER_DESC wfdesc;
 	ZeroMemory(&wfdesc, sizeof(D3D11_RASTERIZER_DESC));
-	wfdesc.FillMode = D3D11_FILL_WIREFRAME; //specifies drawn primitives will resemble wireframes
-	wfdesc.CullMode = D3D11_CULL_NONE; // specifies that both sides of primitives will be drawn
-	hr = d3d11Device->CreateRasterizerState(&wfdesc, &WireFrame);
+	wfdesc.FillMode = D3D11_FILL_SOLID; //specifies drawn primitives will resemble wireframes
+	wfdesc.CullMode = D3D11_CULL_FRONT; // specifies that both sides of primitives will be drawn
+	hr = d3d11Device->CreateRasterizerState(&wfdesc, &FULL);
 
 	//load textures into memory
 	hr = CreateWICTextureFromFile(d3d11Device, L"nuclear-symbol.jpg", NULL, &CubeTexture, 0);
@@ -476,15 +483,51 @@ bool InitScene() {
 	sampDesc.MaxLOD = D3D11_FLOAT32_MAX;
 
 	hr = d3d11Device->CreateSamplerState(&sampDesc, &CubesTexSamplerState);
+
+	//describe and create blend state
+	D3D11_BLEND_DESC blendDesc;
+	ZeroMemory(&blendDesc, sizeof(blendDesc));
+
+	D3D11_RENDER_TARGET_BLEND_DESC rtbd;
+	ZeroMemory(&rtbd, sizeof(rtbd));
+
+	rtbd.BlendEnable = true;
+	rtbd.SrcBlend = D3D11_BLEND_SRC_COLOR;
+	rtbd.DestBlend = D3D11_BLEND_BLEND_FACTOR;
+	rtbd.BlendOp = D3D11_BLEND_OP_ADD;
+	rtbd.SrcBlendAlpha = D3D11_BLEND_ONE;
+	rtbd.DestBlendAlpha = D3D11_BLEND_ZERO;
+	rtbd.BlendOpAlpha = D3D11_BLEND_OP_ADD;
+	rtbd.RenderTargetWriteMask = D3D10_COLOR_WRITE_ENABLE_ALL;
+
+	blendDesc.AlphaToCoverageEnable = false;
+	blendDesc.RenderTarget[0] = rtbd;
+
+	d3d11Device->CreateBlendState(&blendDesc, &Transparency);
+
+	//define rasterizer states for blending
+	D3D11_RASTERIZER_DESC cmdesc;
+	ZeroMemory(&cmdesc, sizeof(D3D11_RASTERIZER_DESC));
+
+	cmdesc.CullMode = D3D11_CULL_BACK;
+	cmdesc.FillMode = D3D11_FILL_SOLID;
+
+	cmdesc.FrontCounterClockwise = true;
+	hr = d3d11Device->CreateRasterizerState(&cmdesc, &CCWcullMode);
+
+	cmdesc.FrontCounterClockwise = false;
+	hr = d3d11Device->CreateRasterizerState(&cmdesc, &CWcullMode);
+
+
 	return true;
 }
 
 void UpdateScene()  { //implements any changes from previous frame
-	rot += .0002f;
+	rot += .002f;
 	static float inc = 0.001f;
 	static float trans = 0.0f;
 	static float scale = 1.0f;
-	static float sinc = 0.005f;
+	static float sinc = 0.0005f;
 	trans += inc;
 	if (trans >= 3.0 || trans <= -3.0) {
 		inc *= -1;
@@ -512,12 +555,44 @@ void UpdateScene()  { //implements any changes from previous frame
 }
 
 void DrawScene() { // performs actual rendering
+	//clear backbuffer
 	float bgColor[4] = { 0.0, 0.0, 0.0, 1.0f };
-
+	
 	d3d11DevCon->ClearRenderTargetView(renderTargetView, bgColor);
+	//clear depth stencil
 	d3d11DevCon->ClearDepthStencilView(depthStencilView, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0, 0.0);
 	World = XMMatrixIdentity();
 	//first cube operations
+	float blendFactor[] = { 0.75f,0.75f,0.75f,1.0f };
+	//set default blend state(no blending)
+	d3d11DevCon->OMSetBlendState(0, 0, 0xffffff);
+
+	d3d11DevCon->OMSetBlendState(Transparency, blendFactor, 0xffffff);
+	//find object closer to camera for rendering purposes
+	XMVECTOR cubePos = XMVectorZero();
+	cubePos = XMVector3TransformCoord(cubePos, cube1World);
+
+	float distX = XMVectorGetX(cubePos) - XMVectorGetX(camPosition);
+	float distY = XMVectorGetY(cubePos) - XMVectorGetY(camPosition);
+	float distZ = XMVectorGetZ(cubePos) - XMVectorGetZ(camPosition);
+
+	float cube1Dist = distX * 2 + distY * 2 + distZ * 2;
+
+	cubePos = XMVectorZero();
+	cubePos = XMVector3TransformCoord(cubePos, cube2World);
+
+	distX = XMVectorGetX(cubePos) - XMVectorGetX(camPosition);
+	distY = XMVectorGetY(cubePos) - XMVectorGetY(camPosition);
+	distZ = XMVectorGetZ(cubePos) - XMVectorGetZ(camPosition);
+
+	float cube2Dist = distX * 2 + distY * 2 + distZ * 2;
+
+	if (cube1Dist < cube2Dist) {
+		XMMATRIX tempMatrix = cube1World;
+		cube1World = cube2World;
+		cube2World = tempMatrix;
+	}
+
 	WVP = cube1World*camView*camProjection;
 	cbPerObj.WVP = XMMatrixTranspose(WVP);
 
@@ -526,9 +601,12 @@ void DrawScene() { // performs actual rendering
 	d3d11DevCon->VSSetConstantBuffers(0, 1, &cbPerObjectBuffer);
 	d3d11DevCon->PSSetShaderResources(0, 1, &CubeTexture);
 	d3d11DevCon->PSSetSamplers(0, 1, &CubesTexSamplerState);
-	d3d11DevCon->RSSetState(NULL);
+	d3d11DevCon->RSSetState(CCWcullMode);
 	d3d11DevCon->DrawIndexed(36, 0,0);
+	//d3d11DevCon->Draw(24, 0);
 
+	d3d11DevCon->RSSetState(CWcullMode);
+	d3d11DevCon->DrawIndexed(36, 0, 0);
 	//second cube operations
 
 	WVP = cube2World*camView*camProjection;
@@ -540,7 +618,11 @@ void DrawScene() { // performs actual rendering
 
 	d3d11DevCon->PSSetShaderResources(0, 1, &CubeTexture);
 	d3d11DevCon->PSSetSamplers(0, 1, &CubesTexSamplerState);
-	d3d11DevCon->RSSetState(NULL);
+	d3d11DevCon->RSSetState(CCWcullMode);
+
+	d3d11DevCon->DrawIndexed(36, 0, 0);
+	//d3d11DevCon->Draw(24, 0);
+	d3d11DevCon->RSSetState(CWcullMode);
 
 	d3d11DevCon->DrawIndexed(36, 0, 0);
 
