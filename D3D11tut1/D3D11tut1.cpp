@@ -79,6 +79,15 @@ IDWriteTextFormat* TextFormat;
 
 std::wstring printText;
 
+//timing variables
+double countsPerSecond;
+__int64 CounterStart = 0;
+
+int frameCount = 0;
+int fps = 0;
+__int64 frameTimeOld = 0;
+double frameTime;
+
 //defining matrices for world space, view space, and projection space
 XMMATRIX WVP;
 XMMATRIX World;
@@ -120,7 +129,7 @@ UINT NUMELEMENTS = ARRAYSIZE(layout);
 bool InitializeDirect3dApp(HINSTANCE hInstance);
 void ReleaseObjects();
 bool InitScene();
-void UpdateScene();
+void UpdateScene(double time);
 void DrawScene();
 bool InitializeWindow(HINSTANCE,
 	int,
@@ -129,6 +138,9 @@ bool InitializeWindow(HINSTANCE,
 bool InitD2D_D3D101_DWrite(IDXGIAdapter1*Adapter);
 void InitD2DScreenTexture();
 void RenderText(std::wstring Text);
+void StartTimer();
+double GetTime();
+double GetFrameTime();
 
 int messageloop();
 HINSTANCE hInst;                                // current instance
@@ -249,7 +261,13 @@ int messageloop() {
 			DispatchMessage(&msg); //sends message to WndProc for processing
 		}
 		else {
-			UpdateScene();
+			frameCount++;
+			if (GetTime() > 1.0f) {
+				fps = frameCount;
+				frameCount = 0;
+				StartTimer();
+			}
+			UpdateScene(GetFrameTime());
 			DrawScene();
 
 		}
@@ -333,6 +351,7 @@ bool InitializeDirect3dApp(HINSTANCE hInstance) {
 }
 
 void ReleaseObjects() {
+
 	SwapChain->Release();
 	d3d11Device->Release();
 	d3d11DevCon->Release();
@@ -512,7 +531,7 @@ bool InitScene() {
 	hr = d3d11Device->CreateBuffer(&constantBufferDesc, &constantBufferData, &cbPerObjectBuffer);
 
 
-	camPosition = XMVectorSet(0.0f, -5.0f, -10.0f, 0.0f);
+	camPosition = XMVectorSet(0.0f, 5.0f, -10.0f, 0.0f);
 	camTarget = XMVectorSet(0.0f, 0.0f, 0.0f, 0.0f); 
 	camUp = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
 
@@ -582,15 +601,20 @@ bool InitScene() {
 	return true;
 }
 
-void UpdateScene()  { //implements any changes from previous frame
-	rot += .002f;
-	static float inc = 0.001f;
+void UpdateScene(double time)  { //implements any changes from previous frame
+	rot += 1.0f*time;
+	static float inc = 5.0f;
 	static float trans = 0.0f;
 	static float scale = 1.0f;
-	static float sinc = 0.0005f;
-	trans += inc;
-	if (trans >= 3.0 || trans <= -3.0) {
+	static float sinc = 1.0f;
+	trans += inc*time;
+	if (trans > 3.0 ) {
 		inc *= -1;
+		trans = 2.99;
+	}
+	else if (trans < -3.0) {
+		inc *= -1;
+		trans = -2.99;
 	}
 	if (rot > 6.28f)
 		rot = 0;
@@ -604,9 +628,15 @@ void UpdateScene()  { //implements any changes from previous frame
 
 	cube2World = XMMatrixIdentity();
 	Rotation = XMMatrixRotationAxis(rotaxis, -rot);
-	if (scale >= 3.0 || scale < 1.0)
+	if (scale > 2.0 ) {
 		sinc *= -1;
-	scale += sinc;
+		scale = 2.0;
+	}
+	else if (scale < 1.0) {
+		sinc *= -1;
+		scale = 1.0;
+	}
+	scale += sinc*time;
 	Scale = XMMatrixScaling(scale, scale, 1.3f);
 
 	cube2World = Rotation*Scale;
@@ -692,7 +722,7 @@ void DrawScene() { // performs actual rendering
 
 	d3d11DevCon->DrawIndexed(36, 0, 0);
 
-	RenderText(L"Hello World");
+	RenderText(L"FPS:");
 
 	SwapChain->Present(0,0);
 }
@@ -835,7 +865,7 @@ void RenderText(std::wstring Text) {
 	D2DRenderTarget->Clear(D2D1::ColorF(0.0f, 0.0f, 0.0f, 0.0f));
 
 	std::wostringstream printString;
-	printString << Text;
+	printString << Text<< fps;
 	printText = printString.str();
 
 	D2D1_COLOR_F FontColor = D2D1::ColorF(1.0f, 1.0f, 1.0f, 1.0f);
@@ -873,4 +903,34 @@ void RenderText(std::wstring Text) {
 	d3d11DevCon->RSSetState(CWcullMode);
 	d3d11DevCon->DrawIndexed(6, 0, 0);
 
+}
+
+void StartTimer() {
+	LARGE_INTEGER frequencyCount;
+	QueryPerformanceFrequency(&frequencyCount);
+	countsPerSecond = double(frequencyCount.QuadPart);
+
+	QueryPerformanceCounter(&frequencyCount);
+	CounterStart = frequencyCount.QuadPart;
+}
+
+double GetTime() {
+	LARGE_INTEGER currentTime;
+	QueryPerformanceCounter(&currentTime);
+	return double(currentTime.QuadPart - CounterStart) / countsPerSecond;
+}
+
+double GetFrameTime() {
+	LARGE_INTEGER currentTime;
+	__int64 TickCount;
+	QueryPerformanceCounter(&currentTime);
+
+	TickCount = currentTime.QuadPart - frameTimeOld;
+	frameTimeOld = currentTime.QuadPart;
+
+	if (TickCount < 0.0f) {
+		TickCount = 0.0f;
+	}
+
+	return float(TickCount) / countsPerSecond;
 }
