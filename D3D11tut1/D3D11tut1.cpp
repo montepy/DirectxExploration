@@ -88,6 +88,11 @@ int fps = 0;
 __int64 frameTimeOld = 0;
 double frameTime;
 
+//lighting buffers
+ID3D11Buffer* cbPerFrameBuffer;
+ID3D11PixelShader*D2D_PS;
+ID3D10Blob* D2D_PS_BUFFER;
+
 //defining matrices for world space, view space, and projection space
 XMMATRIX WVP;
 XMMATRIX World;
@@ -100,6 +105,7 @@ XMVECTOR camUp;
 
 struct cbPerObject {
 	XMMATRIX WVP;
+	XMMATRIX World;
 };
 
 cbPerObject cbPerObj;
@@ -117,12 +123,35 @@ float rot = 0.01f;
 struct Vertex {
 	XMFLOAT3 pos; 
 	XMFLOAT2 texCoord; 
+	XMFLOAT3 normal;
 };
 
 D3D11_INPUT_ELEMENT_DESC layout[] = { //specifies input layout when vertex data is written to vertex buffer
 	{"POSITION", 0,DXGI_FORMAT_R32G32B32_FLOAT, 0, 0, D3D11_INPUT_PER_VERTEX_DATA,0},
-	{"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,0,12,D3D11_INPUT_PER_VERTEX_DATA,0 }//Note:fifth parameter specifies offset in bytes from beginning of struct
+	{"TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,0,12,D3D11_INPUT_PER_VERTEX_DATA,0 },//Note:fifth parameter specifies offset in bytes from beginning of struct
+	{"NORMAL", 0, DXGI_FORMAT_R32G32B32_FLOAT,0,20,D3D11_INPUT_PER_VERTEX_DATA,0 }
 };
+
+
+//declaring light struct
+struct Light
+{	Light() {
+		ZeroMemory(this, sizeof(Light));
+	}
+	XMFLOAT3 dir;
+	float pad;
+	XMFLOAT4 ambient;
+	XMFLOAT4 diffuse;
+};
+
+Light light;
+
+struct cbPerFrame {
+	Light light;
+};
+
+cbPerFrame constBufferPerFrame;
+
 
 UINT NUMELEMENTS = ARRAYSIZE(layout);
 
@@ -383,6 +412,8 @@ void ReleaseObjects() {
 	DWriteFactory->Release();
 	TextFormat->Release();
 	d2dTexture->Release();
+
+	cbPerFrameBuffer->Release();
 }
 
 bool InitScene() {
@@ -390,9 +421,11 @@ bool InitScene() {
 	//Compiling Shaders
 	hr = D3DCompileFromFile(L"Effects.fx", 0, 0, "VS", "vs_5_0", 0, 0, &VS_Buffer, 0);
 	hr = D3DCompileFromFile(L"Effects.fx", 0, 0, "PS", "ps_5_0", 0, 0, &PS_Buffer, 0);
+	hr = D3DCompileFromFile(L"Effects.fx", 0, 0, "D2D_PS", "ps_4_0", 0, 0, &D2D_PS_BUFFER, 0);
 	//Creating Shaders
 	hr = d3d11Device->CreateVertexShader(VS_Buffer->GetBufferPointer(), VS_Buffer->GetBufferSize(), NULL, &VS);
 	hr = d3d11Device->CreatePixelShader(PS_Buffer->GetBufferPointer(), PS_Buffer->GetBufferSize(), NULL, &PS);
+	hr = d3d11Device->CreatePixelShader(D2D_PS_BUFFER->GetBufferPointer(), D2D_PS_BUFFER->GetBufferSize(),NULL,&D2D_PS);
 	//Setting Shaders
 	d3d11DevCon->VSSetShader(VS, NULL, NULL);
 	d3d11DevCon->PSSetShader(PS, NULL, NULL);
@@ -400,40 +433,40 @@ bool InitScene() {
 	//Creating and populating Vertex Buffers
 	Vertex v[] = { //remember that structs do not have constructors unless defined!
 		// Front Face
-		{{-1.0f, -1.0f, -1.0f}, {0.0f, 1.0f}},
-		{{-1.0f,  1.0f, -1.0f}, {0.0f, 0.0f}},
-		{{1.0f,  1.0f, -1.0f}, {1.0f, 0.0f}},
-		{{1.0f, -1.0f, -1.0f}, {1.0f, 1.0f}},
+		{{-1.0f, -1.0f, -1.0f}, {0.0f, 1.0f}, {-1.0f, -1.0f, -1.0f}},
+		{{-1.0f,  1.0f, -1.0f}, {0.0f, 0.0f},{ -1.0f,  1.0f, -1.0f }},
+		{{1.0f,  1.0f, -1.0f}, {1.0f, 0.0f} ,{ 1.0f,  1.0f, -1.0f }},
+		{{1.0f, -1.0f, -1.0f}, {1.0f, 1.0f} ,{ 1.0f, -1.0f, -1.0f }},
 
 		// Back Face
-		{ { -1.0f, -1.0f, 1.0f}, {1.0f, 1.0f}},
-		{ { 1.0f, -1.0f, 1.0f},{ 0.0f, 1.0f}},
-		{ { 1.0f,  1.0f, 1.0f}, {0.0f, 0.0f}},
-		{ { -1.0f,  1.0f, 1.0f},{ 1.0f, 0.0f}},
+		{ { -1.0f, -1.0f, 1.0f}, {1.0f, 1.0f} ,{ -1.0f, -1.0f, 1.0f }},
+		{ { 1.0f, -1.0f, 1.0f},{ 0.0f, 1.0f} ,{ 1.0f, -1.0f, 1.0f }},
+		{ { 1.0f,  1.0f, 1.0f}, {0.0f, 0.0f} ,{ 1.0f,  1.0f, 1.0f }},
+		{ { -1.0f,  1.0f, 1.0f},{ 1.0f, 0.0f},{ -1.0f,  1.0f, 1.0f }},
 
 		// Top Face
-		{ { -1.0f, 1.0f, -1.0f}, {1.0f, 1.0f}},
-		{ { -1.0f, 1.0f,  1.0f}, {0.0f, 1.0f}},
-		{ { 1.0f, 1.0f,  1.0f}, {0.0f, 0.0f}},
-		{ { 1.0f, 1.0f, -1.0f}, {1.0f, 0.0f}},
+		{ { -1.0f, 1.0f, -1.0f}, {1.0f, 1.0f},{ -1.0f, 1.0f, -1.0f }},
+		{ { -1.0f, 1.0f,  1.0f}, {0.0f, 1.0f},{ -1.0f, 1.0f,  1.0f }},
+		{ { 1.0f, 1.0f,  1.0f}, {0.0f, 0.0f},{ 1.0f, 1.0f,  1.0f }},
+		{ { 1.0f, 1.0f, -1.0f}, {1.0f, 0.0f},{ 1.0f, 1.0f, -1.0f }},
 
 		// Bottom Face
-		{ { -1.0f, -1.0f, -1.0f}, {1.0f, 1.0f}},
-		{ { 1.0f, -1.0f, -1.0f}, {0.0f, 1.0f}},
-		{ { 1.0f, -1.0f,  1.0f}, {0.0f, 0.0f}},
-		{ { -1.0f, -1.0f,  1.0f}, {1.0f, 0.0f}},
+		{ { -1.0f, -1.0f, -1.0f}, {1.0f, 1.0f},{ -1.0f, -1.0f, -1.0f }},
+		{ { 1.0f, -1.0f, -1.0f}, {0.0f, 1.0f},{ 1.0f, -1.0f, -1.0f }},
+		{ { 1.0f, -1.0f,  1.0f}, {0.0f, 0.0f},{ 1.0f, -1.0f,  1.0f }},
+		{ { -1.0f, -1.0f,  1.0f}, {1.0f, 0.0f},{ -1.0f, -1.0f,  1.0f }},
 
 		// Left Face
-		{ { -1.0f, -1.0f,  1.0f}, {0.0f, 1.0f}},
-		{ { -1.0f,  1.0f,  1.0f}, {0.0f, 0.0f}},
-		{ { -1.0f,  1.0f, -1.0f}, {1.0f, 0.0f}},
-		{ { -1.0f, -1.0f, -1.0f}, {1.0f, 1.0f}},
+		{ { -1.0f, -1.0f,  1.0f}, {0.0f, 1.0f},{ -1.0f, -1.0f,  1.0f }},
+		{ { -1.0f,  1.0f,  1.0f}, {0.0f, 0.0f},{ -1.0f,  1.0f,  1.0f }},
+		{ { -1.0f,  1.0f, -1.0f}, {1.0f, 0.0f},{ -1.0f,  1.0f, -1.0f }},
+		{ { -1.0f, -1.0f, -1.0f}, {1.0f, 1.0f},{ -1.0f, -1.0f, -1.0f }},
 
 		// Right Face
-		{ { 1.0f, -1.0f, -1.0f}, {0.0f, 1.0f}},
-		{ { 1.0f,  1.0f, -1.0f}, {0.0f, 0.0f}},
-		{ { 1.0f,  1.0f,  1.0f}, {1.0f, 0.0f}},
-		{ { 1.0f, -1.0f,  1.0f}, {1.0f, 1.0f}}
+		{ { 1.0f, -1.0f, -1.0f}, {0.0f, 1.0f},{ 1.0f, -1.0f, -1.0f }},
+		{ { 1.0f,  1.0f, -1.0f}, {0.0f, 0.0f},{ 1.0f,  1.0f, -1.0f }},
+		{ { 1.0f,  1.0f,  1.0f}, {1.0f, 0.0f},{ 1.0f,  1.0f,  1.0f }},
+		{ { 1.0f, -1.0f,  1.0f}, {1.0f, 1.0f},{ 1.0f, -1.0f,  1.0f }}
 
 	};
 	//Buffer description
@@ -525,11 +558,17 @@ bool InitScene() {
 	constantBufferDesc.CPUAccessFlags = 0;
 	constantBufferDesc.MiscFlags = 0;
 
-	D3D11_SUBRESOURCE_DATA constantBufferData;
-	constantBufferData.pSysMem = &cbPerObj;
+	hr = d3d11Device->CreateBuffer(&constantBufferDesc, NULL, &cbPerObjectBuffer);
 
-	hr = d3d11Device->CreateBuffer(&constantBufferDesc, &constantBufferData, &cbPerObjectBuffer);
+	ZeroMemory(&constantBufferDesc, sizeof(D3D11_BUFFER_DESC));
 
+	constantBufferDesc.Usage = D3D11_USAGE_DEFAULT;
+	constantBufferDesc.ByteWidth = sizeof(cbPerFrame);
+	constantBufferDesc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
+	constantBufferDesc.CPUAccessFlags = 0;
+	constantBufferDesc.MiscFlags = 0;
+
+	hr = d3d11Device->CreateBuffer(&constantBufferDesc, NULL, &cbPerFrameBuffer);
 
 	camPosition = XMVectorSet(0.0f, 5.0f, -10.0f, 0.0f);
 	camTarget = XMVectorSet(0.0f, 0.0f, 0.0f, 0.0f); 
@@ -547,7 +586,7 @@ bool InitScene() {
 	hr = d3d11Device->CreateRasterizerState(&wfdesc, &FULL);
 
 	//load textures into memory
-	hr = CreateWICTextureFromFile(d3d11Device, L"nuclear-symbol.jpg", NULL, &CubeTexture, 0);
+	hr = CreateWICTextureFromFile(d3d11Device, L"gray.jpg", NULL, &CubeTexture, 0);
 	//describe how the texture is rendered
 	D3D11_SAMPLER_DESC sampDesc;
 	ZeroMemory(&sampDesc, sizeof(sampDesc));
@@ -598,6 +637,11 @@ bool InitScene() {
 
 	InitD2DScreenTexture();
 
+
+
+	
+	
+
 	return true;
 }
 
@@ -646,18 +690,23 @@ void UpdateScene(double time)  { //implements any changes from previous frame
 
 void DrawScene() { // performs actual rendering
 	//clear backbuffer
-	float bgColor[4] = { 0.0, 0.0, 0.0, 1.0f };
+	float bgColor[4] = { 0.0, 0.0, 0.0, 0.0f };
 	
 	d3d11DevCon->ClearRenderTargetView(renderTargetView, bgColor);
 	//clear depth stencil
 	d3d11DevCon->ClearDepthStencilView(depthStencilView, D3D11_CLEAR_DEPTH | D3D11_CLEAR_STENCIL, 1.0, 0.0);
 	World = XMMatrixIdentity();
 	//first cube operations
-	float blendFactor[] = { 0.75f,0.75f,0.75f,1.0f };
+	//float blendFactor[] = { 0.75f,0.75f,0.75f,1.0f };
 	//set default blend state(no blending)
 	d3d11DevCon->OMSetBlendState(0, 0, 0xffffff);
 
-	d3d11DevCon->OMSetBlendState(Transparency, blendFactor, 0xffffff);
+	//d3d11DevCon->OMSetBlendState(Transparency, blendFactor, 0xffffff);
+
+	d3d11DevCon->VSSetShader(VS, 0, 0);
+	d3d11DevCon->PSSetShader(PS, 0, 0);
+
+	d3d11DevCon->OMSetRenderTargets(1, &renderTargetView, depthStencilView);
 
 	d3d11DevCon->IASetIndexBuffer(IndexBuffer, DXGI_FORMAT_R32_UINT, 0);
 
@@ -689,8 +738,18 @@ void DrawScene() { // performs actual rendering
 		cube2World = tempMatrix;
 	}*/
 
+	//light setting
+	light.dir = XMFLOAT3(1.0f, 0.0f, 0.0f);
+	light.ambient = XMFLOAT4(0.2f, 0.2f, 0.2f, 1.0f);
+	light.diffuse = XMFLOAT4(0.5f, 1.0f, 0.5f, 1.0f);
+
+	constBufferPerFrame.light = light;
+	d3d11DevCon->UpdateSubresource(cbPerFrameBuffer, 0, NULL, &constBufferPerFrame, 0, 0);
+	d3d11DevCon->PSSetConstantBuffers(0, 1, &cbPerFrameBuffer);
+
 	WVP = cube1World*camView*camProjection;
 	cbPerObj.WVP = XMMatrixTranspose(WVP);
+	cbPerObj.World = XMMatrixTranspose(cube1World);
 
 	d3d11DevCon->UpdateSubresource(cbPerObjectBuffer, 0, NULL, &cbPerObj, 0, 0);
 
@@ -701,12 +760,13 @@ void DrawScene() { // performs actual rendering
 	d3d11DevCon->DrawIndexed(36, 0,0);
 	//d3d11DevCon->Draw(24, 0);
 
-	d3d11DevCon->RSSetState(CWcullMode);
-	d3d11DevCon->DrawIndexed(36, 0, 0);
+	//d3d11DevCon->RSSetState(CWcullMode);
+	//d3d11DevCon->DrawIndexed(36, 0, 0);
 	//second cube operations
 
 	WVP = cube2World*camView*camProjection;
 	cbPerObj.WVP = XMMatrixTranspose(WVP);
+	cbPerObj.World = XMMatrixTranspose(cube2World);
 
 	d3d11DevCon->UpdateSubresource(cbPerObjectBuffer, 0, NULL, &cbPerObj, 0, 0);
 
@@ -718,9 +778,9 @@ void DrawScene() { // performs actual rendering
 
 	d3d11DevCon->DrawIndexed(36, 0, 0);
 	//d3d11DevCon->Draw(24, 0);
-	d3d11DevCon->RSSetState(CWcullMode);
+	//d3d11DevCon->RSSetState(CWcullMode);
 
-	d3d11DevCon->DrawIndexed(36, 0, 0);
+	//d3d11DevCon->DrawIndexed(36, 0, 0);
 
 	RenderText(L"FPS:");
 
@@ -889,12 +949,16 @@ void RenderText(std::wstring Text) {
 
 	d3d11DevCon->OMSetBlendState(Transparency, NULL, 0xffffff);
 	d3d11DevCon->IASetIndexBuffer(d2dIndexBuffer, DXGI_FORMAT_R32_UINT, 0);
+
+	d3d11DevCon->PSSetShader(D2D_PS, NULL, 0);
+
 	UINT stride = sizeof(Vertex);
 	UINT offset = 0;
 	d3d11DevCon->IASetVertexBuffers(0, 1, &d2dVertBuffer, &stride, &offset);
 
 	WVP = XMMatrixIdentity();
 	cbPerObj.WVP = XMMatrixTranspose(WVP);
+	cbPerObj.World = XMMatrixTranspose(WVP);
 	d3d11DevCon->UpdateSubresource(cbPerObjectBuffer, 0, NULL, &cbPerObj, 0, 0);
 	d3d11DevCon->VSSetConstantBuffers(0, 1, &cbPerObjectBuffer);
 	d3d11DevCon->PSSetShaderResources(0, 1, &d2dTexture);
