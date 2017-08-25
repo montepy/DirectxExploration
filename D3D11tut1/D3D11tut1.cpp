@@ -140,6 +140,10 @@ struct Light
 	}
 	XMFLOAT3 dir;
 	float pad;
+	XMFLOAT3 att;
+	XMFLOAT3 pos;
+	float pad2;
+	float range;
 	XMFLOAT4 ambient;
 	XMFLOAT4 diffuse;
 };
@@ -638,9 +642,14 @@ bool InitScene() {
 	InitD2DScreenTexture();
 
 
+	//light setting
+	//light.dir = XMFLOAT3(1.0f, 0.0f, 0.0f);
+	light.ambient = XMFLOAT4(0.3f, 0.3f, 0.3f, 1.0f);
+	light.diffuse = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
+	light.pos = XMFLOAT3(0.0f, 0.0f, 0.0f);
+	light.range = 100.0f;
+	light.att = XMFLOAT3(0.0f, 0.2f, 0.0f);
 
-	
-	
 
 	return true;
 }
@@ -685,6 +694,13 @@ void UpdateScene(double time)  { //implements any changes from previous frame
 
 	cube2World = Rotation*Scale;
 
+	XMVECTOR lightVector = XMVectorSet(0.0f, 0.0f, 0.0f, 0.0f);
+	//lightVector = XMVector3TransformCoord(lightVector, cube2World);
+
+	light.pos.x = XMVectorGetX(lightVector);
+	light.pos.y = XMVectorGetY(lightVector);
+	light.pos.z = XMVectorGetZ(lightVector);
+
 	return;
 }
 
@@ -702,6 +718,10 @@ void DrawScene() { // performs actual rendering
 	d3d11DevCon->OMSetBlendState(0, 0, 0xffffff);
 
 	//d3d11DevCon->OMSetBlendState(Transparency, blendFactor, 0xffffff);
+
+	constBufferPerFrame.light = light;
+	d3d11DevCon->UpdateSubresource(cbPerFrameBuffer, 0, NULL, &constBufferPerFrame, 0, 0);
+	d3d11DevCon->PSSetConstantBuffers(0, 1, &cbPerFrameBuffer);
 
 	d3d11DevCon->VSSetShader(VS, 0, 0);
 	d3d11DevCon->PSSetShader(PS, 0, 0);
@@ -738,14 +758,7 @@ void DrawScene() { // performs actual rendering
 		cube2World = tempMatrix;
 	}*/
 
-	//light setting
-	light.dir = XMFLOAT3(1.0f, 0.0f, 0.0f);
-	light.ambient = XMFLOAT4(0.2f, 0.2f, 0.2f, 1.0f);
-	light.diffuse = XMFLOAT4(0.5f, 1.0f, 0.5f, 1.0f);
 
-	constBufferPerFrame.light = light;
-	d3d11DevCon->UpdateSubresource(cbPerFrameBuffer, 0, NULL, &constBufferPerFrame, 0, 0);
-	d3d11DevCon->PSSetConstantBuffers(0, 1, &cbPerFrameBuffer);
 
 	WVP = cube1World*camView*camProjection;
 	cbPerObj.WVP = XMMatrixTranspose(WVP);
@@ -777,6 +790,7 @@ void DrawScene() { // performs actual rendering
 	d3d11DevCon->RSSetState(CCWcullMode);
 
 	d3d11DevCon->DrawIndexed(36, 0, 0);
+
 	//d3d11DevCon->Draw(24, 0);
 	//d3d11DevCon->RSSetState(CWcullMode);
 
