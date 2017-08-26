@@ -10,6 +10,8 @@
 #pragma comment(lib, "DXGI.lib")
 #pragma comment(lib, "D2D1.lib")
 #pragma comment(lib,"dwrite.lib")
+#pragma comment(lib,"dinput8.lib")
+#pragma comment(lib,"dxguid.lib")
 
 #include "stdafx.h"
 
@@ -21,6 +23,7 @@
 #include <DirectXMath.h>
 #include <d3dcompiler.h>
 #include <WICTextureLoader.h>
+#include <dinput.h>
 
 //font includes
 #include <d3d10_1.h>
@@ -112,12 +115,8 @@ cbPerObject cbPerObj;
 
 //matrices for world transformations
 XMMATRIX cube1World;
-XMMATRIX cube2World;
+//XMMATRIX cube2World;
 
-XMMATRIX Rotation;
-XMMATRIX Scale;
-XMMATRIX Translation;
-float rot = 0.01f;
 
 //declaring vertex struct and vertice input layout
 struct Vertex {
@@ -156,6 +155,22 @@ struct cbPerFrame {
 
 cbPerFrame constBufferPerFrame;
 
+//input variables
+IDirectInputDevice8* DIKeyboard;
+IDirectInputDevice8* DIMouse;
+
+DIMOUSESTATE mouseLastState;
+LPDIRECTINPUT8 DirectInput;
+
+float rotx = 0;
+float rotz = 0;
+float scaleX = 1.0f;
+float scaleY = 1.0f;
+
+XMMATRIX rotationY;
+XMMATRIX rotationX;
+
+
 
 UINT NUMELEMENTS = ARRAYSIZE(layout);
 
@@ -174,6 +189,9 @@ void RenderText(std::wstring Text);
 void StartTimer();
 double GetTime();
 double GetFrameTime();
+
+bool InitDirectInput(HINSTANCE hInstance);
+void DetectInput(double time);
 
 int messageloop();
 HINSTANCE hInst;                                // current instance
@@ -197,6 +215,10 @@ int WINAPI WinMain(HINSTANCE hInstance,
 		MessageBox(0, L"Direct3D Initialization - Failed",
 			L"Error", MB_OK);
 		return 0;
+	}
+	if (!InitDirectInput(hInstance)) {
+		MessageBox(0, L"DirectInput Initialization - Failed",
+			L"Error", MB_OK);
 	}
 	if (!InitScene()) {
 		MessageBox(0, L"Scene Initialization - Failed",
@@ -646,7 +668,7 @@ bool InitScene() {
 	//light.dir = XMFLOAT3(1.0f, 0.0f, 0.0f);
 	light.ambient = XMFLOAT4(0.3f, 0.3f, 0.3f, 1.0f);
 	light.diffuse = XMFLOAT4(1.0f, 1.0f, 1.0f, 1.0f);
-	light.pos = XMFLOAT3(0.0f, 0.0f, 0.0f);
+	//light.pos = XMFLOAT3(7.0f, 7.0f, 0.0f);
 	light.range = 100.0f;
 	light.att = XMFLOAT3(0.0f, 0.2f, 0.0f);
 
@@ -655,7 +677,12 @@ bool InitScene() {
 }
 
 void UpdateScene(double time)  { //implements any changes from previous frame
-	rot += 1.0f*time;
+	DetectInput(time);
+	XMMATRIX RotationX;
+	XMMATRIX RotationZ;
+	XMMATRIX Scale;
+	float rot = 0.01f;
+	/*rot += 1.0f*time;
 	static float inc = 5.0f;
 	static float trans = 0.0f;
 	static float scale = 1.0f;
@@ -670,16 +697,19 @@ void UpdateScene(double time)  { //implements any changes from previous frame
 		trans = -2.99;
 	}
 	if (rot > 6.28f)
-		rot = 0;
+		rot = 0;*/
 	cube1World = XMMatrixIdentity();
-	XMVECTOR rotaxis = XMVectorSet(0.0f, 1.0f, 0.0f, 0.0f);
-	Rotation = XMMatrixRotationAxis(rotaxis, rot);
-	Translation = XMMatrixTranslation(0.0f, trans, 5.0f);
+	XMVECTOR rotaxisX = XMVectorSet(1.0f, 0.0f, 0.0f, 0.0f);
+	RotationX = XMMatrixRotationAxis(rotaxisX, rotx);
+	XMVECTOR rotaxisZ = XMVectorSet(0.0f, 0.0f, 1.0f, 0.0f);
+	RotationZ = XMMatrixRotationAxis(rotaxisZ, rotz);
+	Scale = XMMatrixScaling(scaleX, scaleY, 1.0f);
 
-	cube1World = Translation* Rotation;//Note that matrix effects are applied in the order that they are multiplied. 
+
+	cube1World = RotationX*RotationZ*Scale;//Note that matrix effects are applied in the order that they are multiplied. 
 	//For example, the operation performed above applies the translation effect, then the rotation
 
-	cube2World = XMMatrixIdentity();
+	/*cube2World = XMMatrixIdentity();
 	Rotation = XMMatrixRotationAxis(rotaxis, -rot);
 	if (scale > 2.0 ) {
 		sinc *= -1;
@@ -692,9 +722,9 @@ void UpdateScene(double time)  { //implements any changes from previous frame
 	scale += sinc*time;
 	Scale = XMMatrixScaling(scale, scale, 1.3f);
 
-	cube2World = Rotation*Scale;
+	cube2World = Rotation*Scale;*/
 
-	XMVECTOR lightVector = XMVectorSet(0.0f, 0.0f, 0.0f, 0.0f);
+	XMVECTOR lightVector = XMVectorSet(7.0f, 7.0f, 0.0f, 0.0f);
 	//lightVector = XMVector3TransformCoord(lightVector, cube2World);
 
 	light.pos.x = XMVectorGetX(lightVector);
@@ -776,7 +806,7 @@ void DrawScene() { // performs actual rendering
 	//d3d11DevCon->RSSetState(CWcullMode);
 	//d3d11DevCon->DrawIndexed(36, 0, 0);
 	//second cube operations
-
+	/*
 	WVP = cube2World*camView*camProjection;
 	cbPerObj.WVP = XMMatrixTranspose(WVP);
 	cbPerObj.World = XMMatrixTranspose(cube2World);
@@ -789,7 +819,7 @@ void DrawScene() { // performs actual rendering
 	d3d11DevCon->PSSetSamplers(0, 1, &CubesTexSamplerState);
 	d3d11DevCon->RSSetState(CCWcullMode);
 
-	d3d11DevCon->DrawIndexed(36, 0, 0);
+	d3d11DevCon->DrawIndexed(36, 0, 0);*/
 
 	//d3d11DevCon->Draw(24, 0);
 	//d3d11DevCon->RSSetState(CWcullMode);
@@ -1011,4 +1041,74 @@ double GetFrameTime() {
 	}
 
 	return float(TickCount) / countsPerSecond;
+}
+
+bool InitDirectInput(HINSTANCE hInstance) {
+
+	HRESULT hr;
+	hr = DirectInput8Create(hInstance,
+		DIRECTINPUT_VERSION,
+		IID_IDirectInput8,
+		(void**)&DirectInput,
+		NULL);
+
+	hr = DirectInput->CreateDevice(GUID_SysKeyboard, &DIKeyboard,NULL);
+
+	hr = DirectInput->CreateDevice(GUID_SysMouse, &DIMouse, NULL);
+
+	hr = DIKeyboard->SetDataFormat(&c_dfDIKeyboard);
+	hr = DIKeyboard->SetCooperativeLevel(hWnd, DISCL_FOREGROUND | DISCL_NONEXCLUSIVE);
+
+	hr = DIMouse->SetDataFormat(&c_dfDIMouse);
+	hr = DIMouse->SetCooperativeLevel(hWnd, DISCL_FOREGROUND | DISCL_EXCLUSIVE |DISCL_NOWINKEY);
+
+	return true;
+}
+
+void DetectInput(double time) {
+	DIMOUSESTATE mouseCurrState;
+
+	BYTE keyboardState[256];
+	DIKeyboard->Acquire();
+	DIMouse->Acquire();
+
+	DIMouse->GetDeviceState(sizeof(DIMOUSESTATE), &mouseCurrState);
+	DIKeyboard->GetDeviceState(sizeof(keyboardState), &keyboardState);
+
+	if (keyboardState[DIK_ESCAPE] & 0x80) {
+		PostMessage(hWnd, WM_DESTROY, 0, 0);
+	}
+	if (keyboardState[DIK_LEFT] & 0x80) {
+		rotz += 1.0f*time;
+	}
+	if (keyboardState[DIK_RIGHT] & 0x80) {
+		rotz -= 1.0f*time;
+	}
+	if (keyboardState[DIK_UP] & 0x80) {
+		rotx += 1.0f*time;
+	}
+	if (keyboardState[DIK_DOWN] & 0x80) {
+		rotx -= 1.0f*time;
+	}
+	if (mouseCurrState.lX != mouseLastState.lX) {
+		scaleX -= mouseCurrState.lX*0.001f;
+	}
+	if (mouseCurrState.lY != mouseLastState.lY) {
+		scaleY -= mouseCurrState.lY*0.001f;
+	}
+
+	if (rotx > 6.28) {
+		rotx -= 6.28;
+	}
+	else if (rotx < 0) {
+		rotx = 6.28 + rotx;
+	}
+	if (rotz > 6.28) {
+		rotz -= 6.28;
+	}
+	else if (rotz < 0) {
+		rotz = 6.28 + rotx;
+	}
+	mouseLastState = mouseCurrState;
+	return;
 }
